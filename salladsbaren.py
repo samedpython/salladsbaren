@@ -1,14 +1,23 @@
 import json
+import hashlib
+import os
 import tkinter as tk
 from tkinter import messagebox
 
 # Ladda ingredienser och sallader från filer
 def load_data():
-    with open("ingredienser.json", "r", encoding="utf-8") as f:
-        ingredienser = json.load(f)
-    with open("sallader.json", "r", encoding="utf-8") as f:
-        sallader = json.load(f)
-    return ingredienser, sallader
+    try:
+        with open("ingredienser.json", "r", encoding="utf-8") as f:
+            ingredienser = json.load(f)
+        with open("sallader.json", "r", encoding="utf-8") as f:
+            sallader = json.load(f)
+        return ingredienser, sallader
+    except FileNotFoundError:
+        messagebox.showerror("Fel", "Datafiler saknas! Kontrollera ingredienser.json och sallader.json.")
+        exit()
+    except json.JSONDecodeError:
+        messagebox.showerror("Fel", "Fel vid laddning av JSON-data. Kontrollera filformatet.")
+        exit()
 
 ingredienser, sallader = load_data()
 
@@ -45,19 +54,15 @@ class SalladsbarApp:
     
     def sok_sallad(self):
         self.valda_ingredienser = [ingr for ingr, var in self.ingredienser_vars.items() if var.get() == 1]
-        
-        print("Valda ingredienser:", self.valda_ingredienser)  # Debugging
 
         if not self.valda_ingredienser:
             self.result_label.config(text="Välj minst en ingrediens.")
-            print("Inga ingredienser valda.")  # Debugging
             return
 
         best_match = None
         max_match_count = 0
         for sallad, data in sallader.items():
             match_count = len(set(data["ingredienser"]) & set(self.valda_ingredienser))
-            print(f"Kontrollerar sallad: {sallad}, Matchning: {match_count}")  # Debugging
             if match_count > max_match_count:
                 best_match = sallad
                 max_match_count = match_count
@@ -68,10 +73,8 @@ class SalladsbarApp:
             self.result_label.config(text=f"Rekommenderad sallad: {best_match} ({sallader[best_match]['pris']} kr). Saknade: {', '.join(saknade)}")
             self.extra_button.config(state=tk.NORMAL)
             self.bekrafta_button.config(state=tk.NORMAL)
-            print(f"Rekommenderad sallad: {best_match}, Saknade: {saknade}")  # Debugging
         else:
             self.result_label.config(text="Ingen sallad kan föreslås, välj fler ingredienser.")
-            print("Ingen matchande sallad hittades.")  # Debugging
     
     def lagg_till_extra(self):
         self.extra_window = tk.Toplevel(self.root)
@@ -91,15 +94,35 @@ class SalladsbarApp:
         self.extra_window.destroy()
     
     def skriv_kvitto(self):
+        if not self.vald_sallad:
+            messagebox.showerror("Fel", "Ingen sallad vald.")
+            return
+
         totalpris = sallader[self.vald_sallad]['pris'] + sum(ingredienser[ingr] for ingr in self.extra_ingredienser)
-        
-        with open("kvitto.txt", "w", encoding="utf-8") as f:
-            f.write(f"Kvitto\n-------------------\n")
-            f.write(f"Sallad: {self.vald_sallad} ({sallader[self.vald_sallad]['pris']} kr)\n")
-            if self.extra_ingredienser:
-                f.write(f"Extra ingredienser: {', '.join(self.extra_ingredienser)}\n")
-            f.write(f"Totalpris: {totalpris} kr\n")
-        
+
+        kvitto_data = {
+            "sallad": self.vald_sallad,
+            "pris": sallader[self.vald_sallad]['pris'],
+            "extra_ingredienser": self.extra_ingredienser,
+            "totalpris": totalpris
+        }
+
+        # Skapa hash av kvittot för att säkerställa att det inte manipuleras
+        kvitto_json = json.dumps(kvitto_data, ensure_ascii=False, indent=4)
+        kvitto_hash = hashlib.sha256(kvitto_json.encode()).hexdigest()
+        kvitto_data["hash"] = kvitto_hash  # Lägger till hash i kvittot
+
+        # Spara kvittot säkert
+        kvitto_fil = "kvitto.json"
+        with open(kvitto_fil, "w", encoding="utf-8") as f:
+            json.dump(kvitto_data, f, ensure_ascii=False, indent=4)
+
+        # Begränsa filrättigheter (bara ägaren kan läsa och skriva)
+        try:
+            os.chmod(kvitto_fil, 0o600)  # Endast läs/skriv för ägaren
+        except Exception as e:
+            print(f"Fel vid ändring av filrättigheter: {e}")
+
         messagebox.showinfo("Kvitto", f"Kvitto sparat! Totalpris: {totalpris} kr")
 
 if __name__ == "__main__":
